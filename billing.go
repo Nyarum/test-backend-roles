@@ -11,6 +11,9 @@ import (
 var ErrInsufficientCredits = errors.New("insufficient credits")
 
 func (d *Dispatcher) Charge(ctx context.Context, accountID, cost int64) error {
+	d.mt.Lock()
+	defer d.mt.Unlock()
+
 	tx, err := d.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -25,6 +28,9 @@ func (d *Dispatcher) Charge(ctx context.Context, accountID, cost int64) error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("br1", accountID, credits)
+	fmt.Println(cost)
 
 	if credits < cost {
 		return ErrInsufficientCredits

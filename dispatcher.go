@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -19,12 +21,15 @@ type Config struct {
 }
 
 type Dispatcher struct {
-	db      *pgxpool.Pool
-	nodeURL string
-	price   int64
-	timeout time.Duration
-	bufs    sync.Pool
-	meter   *Meter
+	db               *pgxpool.Pool
+	nodeURL          string
+	price            int64
+	timeout          time.Duration
+	bufs             sync.Pool
+	meter            *Meter
+	mt               *sync.Mutex
+	client           *http.Client
+	limitConnections chan struct{}
 }
 
 func New(db *pgxpool.Pool, cfg Config) *Dispatcher {
@@ -38,6 +43,21 @@ func New(db *pgxpool.Pool, cfg Config) *Dispatcher {
 		price:   cfg.PricePerRequest,
 		timeout: timeout,
 		meter:   NewMeter(1024),
+		mt:      &sync.Mutex{},
+		client: &http.Client{
+			Timeout: timeout,
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   5 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   5 * time.Second,
+				ResponseHeaderTimeout: timeout,
+				IdleConnTimeout:       90 * time.Second,
+			},
+		},
+		limitConnections: make(chan struct{}, 1),
 	}
 	d.bufs.New = func() any {
 		return new(bytes.Buffer)
@@ -46,6 +66,11 @@ func New(db *pgxpool.Pool, cfg Config) *Dispatcher {
 }
 
 func (d *Dispatcher) Dispatch(ctx context.Context, accountID int64, prompt string, sink io.Writer) error {
+	d.limitConnections <- struct{}{}
+	defer func() {
+		<-d.limitConnections
+	}()
+
 	if err := d.Charge(ctx, accountID, d.price); err != nil {
 		return fmt.Errorf("charge account %d: %w", accountID, err)
 	}
@@ -58,6 +83,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, accountID int64, prompt strin
 	if err := d.stream(accountID, resp, sink); err != nil {
 		return fmt.Errorf("stream: %w", err)
 	}
+
 	return nil
 }
 

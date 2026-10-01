@@ -24,6 +24,7 @@ func (d *Dispatcher) stream(accountID int64, resp *http.Response, sink io.Writer
 	if werr := <-written; err == nil {
 		err = werr
 	}
+
 	return err
 }
 
@@ -32,6 +33,7 @@ func (d *Dispatcher) readEvents(accountID int64, body io.Reader, out chan<- []by
 	var data []string
 	for sc.Scan() {
 		line := sc.Text()
+
 		switch {
 		case line == "":
 			if len(data) == 0 {
@@ -64,7 +66,10 @@ func (d *Dispatcher) emit(accountID int64, data []string, out chan<- []byte) {
 		buf.WriteString(s)
 	}
 
-	chunk := buf.Bytes()
+	copyChunk := make([]byte, len(buf.Bytes()))
+	copy(copyChunk, buf.Bytes())
+
+	chunk := copyChunk
 	out <- chunk
 	d.meter.Record(accountID, chunk)
 }
