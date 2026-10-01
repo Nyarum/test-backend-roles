@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS accounts (
+    id      BIGINT PRIMARY KEY,
+    credits BIGINT NOT NULL
+);
